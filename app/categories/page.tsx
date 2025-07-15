@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -22,76 +22,93 @@ import { Textarea } from "@/components/ui/textarea"
 import { Plus, Search, Edit, Trash2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
-const initialCategories = [
-  {
-    id: 1,
-    nom: "Homme",
-    description: "Vêtements et accessoires pour hommes",
-  },
-  {
-    id: 2,
-    nom: "Femme",
-    description: "Vêtements et accessoires pour femmes",
-  },
-  {
-    id: 3,
-    nom: "Enfants",
-    description: "Vêtements pour enfants de tous âges",
-  },
-  {
-    id: 4,
-    nom: "Accessoires",
-    description: "Sacs, bijoux et autres accessoires",
-  },
-  {
-    id: 5,
-    nom: "Chaussures",
-    description: "Chaussures pour toute la famille",
-  },
-]
+const API_URL = "http://localhost:8000/api/categories"
 
 export default function CategoriesPage() {
-  const [categories, setCategories] = useState(initialCategories)
+  const [categories, setCategories] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<any>(null)
   const { toast } = useToast()
+  const [loading, setLoading] = useState(false)
 
   const [formData, setFormData] = useState({
-    nom: "",
-    description: "",
+    categorie_parent_id: '',
+    nom: '',
+    description: '',
   })
+
+  // Charger les catégories depuis l'API au montage
+  useEffect(() => {
+    setLoading(true)
+    fetch(API_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error("Erreur lors du chargement des catégories")
+        return res.json()
+      })
+      .then((data) => {
+        setCategories(Array.isArray(data) ? data : data.categories || [])
+      })
+      .catch(() => {
+        toast({
+          title: "Erreur",
+          description: "Impossible de charger les catégories.",
+          variant: "destructive",
+        })
+      })
+      .finally(() => setLoading(false))
+  }, [])
 
   const filteredCategories = categories.filter((category) =>
     category.nom.toLowerCase().includes(searchTerm.toLowerCase()),
   )
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Création ou modification
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    if (editingCategory) {
-      setCategories(
-        categories.map((category) => (category.id === editingCategory.id ? { ...category, ...formData } : category)),
-      )
-      toast({
-        title: "Catégorie modifiée",
-        description: "La catégorie a été modifiée avec succès.",
-      })
-    } else {
-      const newCategory = {
-        id: Math.max(...categories.map((c) => c.id)) + 1,
-        ...formData,
+    setLoading(true)
+    try {
+      if (editingCategory) {
+        // Modification
+        const res = await fetch(`${API_URL}/${editingCategory.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(formData),
+        })
+        if (!res.ok) throw new Error()
+        const updated = await res.json()
+        setCategories(categories.map((cat) => (cat.id === updated.id ? updated : cat)))
+        toast({
+          title: "Catégorie modifiée",
+          description: "La catégorie a été modifiée avec succès.",
+        })
+      } else {
+        // Création
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(formData),
+        })
+        if (!res.ok) throw new Error()
+        const created = await res.json()
+        setCategories([...categories, created])
+        toast({
+          title: "Catégorie créée",
+          description: "La catégorie a été créée avec succès.",
+        })
       }
-      setCategories([...categories, newCategory])
+      setIsDialogOpen(false)
+      setEditingCategory(null)
+      setFormData({ nom: "", description: "" })
+    } catch {
       toast({
-        title: "Catégorie créée",
-        description: "La catégorie a été créée avec succès.",
+        title: "Erreur",
+        description: "Une erreur est survenue lors de l'enregistrement.",
+        variant: "destructive",
       })
+    } finally {
+      setLoading(false)
     }
-
-    setIsDialogOpen(false)
-    setEditingCategory(null)
-    setFormData({ nom: "", description: "" })
   }
 
   const handleEdit = (category: any) => {
@@ -103,13 +120,27 @@ export default function CategoriesPage() {
     setIsDialogOpen(true)
   }
 
-  const handleDelete = (id: number) => {
-    setCategories(categories.filter((category) => category.id !== id))
-    toast({
-      title: "Catégorie supprimée",
-      description: "La catégorie a été supprimée avec succès.",
-      variant: "destructive",
-    })
+  const handleDelete = async (id: number) => {
+    if (!window.confirm("Voulez-vous vraiment supprimer cette catégorie ?")) return
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_URL}/${id}`, { method: "DELETE" })
+      if (!res.ok) throw new Error()
+      setCategories(categories.filter((category) => category.id !== id))
+      toast({
+        title: "Catégorie supprimée",
+        description: "La catégorie a été supprimée avec succès.",
+        variant: "destructive",
+      })
+    } catch {
+      toast({
+        title: "Erreur",
+        description: "Impossible de supprimer la catégorie.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -150,6 +181,19 @@ export default function CategoriesPage() {
                   </DialogHeader>
                   <form onSubmit={handleSubmit}>
                     <div className="grid gap-4 py-4">
+                      <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="categorie_parent_id" className="text-right">
+                          Catégorie Parent ID
+                        </Label>
+                        <Input
+                          id="categorie_parent_id"
+                          type="number"
+                          value={formData.categorie_parent_id}
+                          onChange={(e) => setFormData({ ...formData, categorie_parent_id: e.target.value })}
+                          className="col-span-3"
+                          min=""
+                        />
+                      </div>
                       <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="nom" className="text-right">
                           Nom
@@ -197,6 +241,8 @@ export default function CategoriesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Catégorie Parent ID</TableHead>
                   <TableHead>Nom</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Actions</TableHead>
@@ -205,6 +251,8 @@ export default function CategoriesPage() {
               <TableBody>
                 {filteredCategories.map((category) => (
                   <TableRow key={category.id}>
+                    <TableCell>{category.id}</TableCell>
+                    <TableCell>{category.categorie_parent_id ?? ''}</TableCell>
                     <TableCell className="font-medium">{category.nom}</TableCell>
                     <TableCell>{category.description}</TableCell>
                     <TableCell>
